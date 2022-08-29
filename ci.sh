@@ -51,7 +51,7 @@ make cross
 sudo mv out/linux-amd64/crc /usr/local/bin/
 popd
 
-crc setup
+crc setup -b crc_libvirt_*.crcbundle
 crc start --disk-size 80 -m 24000 -c 10 -p "${HOME}"/pull-secret -b crc_libvirt_*.crcbundle
 
 mkdir -p /tmp/artifacts
