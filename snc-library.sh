@@ -46,6 +46,7 @@ function download_oc() {
 }
 
 function run_preflight_checks() {
+	local preset=${1:-snc}
         if [ -z "${OPENSHIFT_PULL_SECRET_PATH-}" ]; then
             echo "OpenShift pull secret file path must be specified through the OPENSHIFT_PULL_SECRET_PATH environment variable"
             exit 1
@@ -56,12 +57,17 @@ function run_preflight_checks() {
 
         echo "Checking libvirt and DNS configuration"
 
-        LIBVIRT_URI=qemu+tcp://localhost/system
+	LIBVIRT_URI=qemu:///system
+	if [ ${preset} == "snc" ]; then
+           LIBVIRT_URI=qemu+tcp://localhost/system
+	fi
 
         # check if libvirtd is listening on a TCP socket
-        if ! virsh -c ${LIBVIRT_URI} uri >/dev/null; then
-                preflight_failure  "libvirtd is not listening for plain-text TCP connections, see https://github.com/openshift/installer/tree/master/docs/dev/libvirt#configure-libvirt-to-accept-tcp-connections"
-        fi
+	if [ ${preset} == "snc" ]; then
+            if ! virsh -c ${LIBVIRT_URI} uri >/dev/null; then
+                    preflight_failure  "libvirtd is not listening for plain-text TCP connections, see https://github.com/openshift/installer/tree/master/docs/dev/libvirt#configure-libvirt-to-accept-tcp-connections"
+            fi
+	fi
 
 	if ! virsh -c ${LIBVIRT_URI} net-info default &> /dev/null; then
 		echo "Installing libvirt default network configuration"
@@ -90,12 +96,14 @@ function run_preflight_checks() {
         fi
 
         # check that api.${CRC_VM_NAME}.${BASE_DOMAIN} either can't be resolved, or resolves to 192.168.126.1[01]
-        local ping_status
-        ping_status="$(ping -c1 api.${CRC_VM_NAME}.${BASE_DOMAIN} | head -1 || true >/dev/null)"
-        if echo ${ping_status} | grep "PING api.${CRC_VM_NAME}.${BASE_DOMAIN} (" && ! echo ${ping_status} | grep "192.168.126.1[01])"; then
-                preflight_failure "DNS setup seems wrong, api.${CRC_VM_NAME}.${BASE_DOMAIN} resolved to an IP which is neither 192.168.126.10 nor 192.168.126.11, please check your NetworkManager configuration and /etc/hosts content"
-                return
-        fi
+	if [ ${preset} == "snc" ]; then
+            local ping_status
+            ping_status="$(ping -c1 api.${CRC_VM_NAME}.${BASE_DOMAIN} | head -1 || true >/dev/null)"
+            if echo ${ping_status} | grep "PING api.${CRC_VM_NAME}.${BASE_DOMAIN} (" && ! echo ${ping_status} | grep "192.168.126.1[01])"; then
+                    preflight_failure "DNS setup seems wrong, api.${CRC_VM_NAME}.${BASE_DOMAIN} resolved to an IP which is neither 192.168.126.10 nor 192.168.126.11, please check your NetworkManager configuration and /etc/hosts content"
+                    return
+            fi
+	fi
 
         # check if firewalld is configured to allow traffic from 192.168.126.0/24 to 192.168.122.1
         # this check is very basic and expects the configuration to match
