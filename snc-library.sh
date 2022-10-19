@@ -138,7 +138,11 @@ function replace_pull_secret() {
 }
 
 function create_json_description {
-    openshiftInstallerVersion=$(${OPENSHIFT_INSTALL} version)
+    local preset=${1:-snc}
+    openshiftInstallerVersion=""
+    if [ ${preset} == "snc" ]; then
+        openshiftInstallerVersion=$(${OPENSHIFT_INSTALL} version)
+    fi
     sncGitHash=$(git describe --abbrev=4 HEAD 2>/dev/null || git rev-parse --short=4 HEAD)
     echo {} | ${JQ} '.version = "1.4"' \
             | ${JQ} ".type = \"${BUNDLE_TYPE}\"" \
