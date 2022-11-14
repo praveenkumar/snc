@@ -138,7 +138,7 @@ mkdir "$libvirtDestDir"
 
 create_qemu_image "$libvirtDestDir" "${VM_PREFIX}-base" "${VM_NAME}"
 mv "${libvirtDestDir}/${VM_NAME}" "${libvirtDestDir}/${CRC_VM_NAME}.qcow2"
-copy_additional_files "$INSTALL_DIR" "$libvirtDestDir"
+copy_additional_files "$INSTALL_DIR" "$libvirtDestDir" "${VM_NAME}"
 create_tarball "$libvirtDestDir"
 
 # vfkit image generation

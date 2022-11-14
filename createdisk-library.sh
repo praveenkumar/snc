@@ -79,6 +79,7 @@ function create_qemu_image {
 function update_json_description {
     local srcDir=$1
     local destDir=$2
+    local vm_name=$3
 
     diskSize=$(du -b $destDir/${CRC_VM_NAME}.qcow2 | awk '{print $1}')
     diskSha256Sum=$(sha256sum $destDir/${CRC_VM_NAME}.qcow2 | awk '{print $1}')
@@ -95,7 +96,7 @@ function update_json_description {
         | ${JQ} '.clusterInfo.kubeConfig = "kubeconfig"' \
         | ${JQ} '.nodes[0].kind[0] = "master"' \
         | ${JQ} '.nodes[0].kind[1] = "worker"' \
-        | ${JQ} ".nodes[0].hostname = \"${VM_PREFIX}-master-0\"" \
+        | ${JQ} ".nodes[0].hostname = \"${vm_name}\"" \
         | ${JQ} ".nodes[0].diskImage = \"${CRC_VM_NAME}.qcow2\"" \
         | ${JQ} ".nodes[0].internalIP = \"${VM_IP}\"" \
         | ${JQ} ".storage.diskImages[0].name = \"${CRC_VM_NAME}.qcow2\"" \
@@ -130,6 +131,7 @@ function eventually_add_pull_secret {
 function copy_additional_files {
     local srcDir=$1
     local destDir=$2
+    local vm_name=$3
 
     # Copy the kubeconfig file
     cp $1/auth/kubeconfig $destDir/
@@ -143,7 +145,7 @@ function copy_additional_files {
 
     cp podman-remote/linux/podman-remote $destDir/
 
-    update_json_description $srcDir $destDir
+    update_json_description $srcDir $destDir $vm_name
 
     eventually_add_pull_secret $destDir
 }
