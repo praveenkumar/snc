@@ -383,3 +383,12 @@ function download_podman() {
       mv podman-remote/windows/podman-${version}/usr/bin/podman.exe  podman-remote/windows
     fi
 }
+
+function create_sparsify_qemu_image {
+    local destDir=$1
+    sudo cp /var/lib/libvirt/images/${CRC_VM_NAME}.qcow2 ${destDir}
+    sudo chown $USER:$USER -R ${destDir}
+    export LIBGUESTFS_BACKEND=direct
+    virt-sparsify --in-place ${destDir}/${CRC_VM_NAME}.qcow2
+    chmod 0644 ${destDir}/${CRC_VM_NAME}.qcow2
+}
