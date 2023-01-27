@@ -74,7 +74,7 @@ EOF
 cat crio-wipe.service | ${SSH} core@${VM_IP} "sudo tee -a /etc/systemd/system/crio-wipe.service"
 
 # Preload routes controller
-${SSH} core@${VM_IP} -- "sudo crictl pull quay.io/crcont/routes-controller:${image_tag}"
+${SSH} core@${VM_IP} -- "sudo podman pull quay.io/crcont/routes-controller:${image_tag}"
 
 if [ "${ARCH}" == "aarch64" ]; then
    # aarch64 support is mainly used on Apple M1 machines which can't run a rhel8 kernel
