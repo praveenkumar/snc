@@ -139,15 +139,21 @@ function shutdown_vm {
     done
 }
 
+function wait_for_ssh {
+    local vm_name=$1
+    local vm_ip=$2
+    until ${SSH} core@${vm_ip} -- "exit 0" >/dev/null 2>&1; do
+        echo " ${vm_name} still booting"
+        sleep 2
+    done
+}
+
 function start_vm {
     local vm_name=$1
     local vm_ip=$2
     retry sudo virsh start ${vm_name}
     # Wait till ssh connection available
-    until ${SSH} core@${vm_ip} -- "exit 0" >/dev/null 2>&1; do
-        echo " ${vm_name} still booting"
-        sleep 2
-    done
+    wait_for_ssh ${vm_name} ${vm_ip}
 }
 
 function generate_htpasswd_file {

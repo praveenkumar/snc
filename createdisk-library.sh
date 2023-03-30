@@ -79,6 +79,7 @@ function create_qemu_image {
 function update_json_description {
     local srcDir=$1
     local destDir=$2
+    local vm_name=$3
 
     diskSize=$(du -b $destDir/${SNC_PRODUCT_NAME}.qcow2 | awk '{print $1}')
     diskSha256Sum=$(sha256sum $destDir/${SNC_PRODUCT_NAME}.qcow2 | awk '{print $1}')
@@ -95,7 +96,7 @@ function update_json_description {
         | ${JQ} '.clusterInfo.kubeConfig = "kubeconfig"' \
         | ${JQ} '.nodes[0].kind[0] = "master"' \
         | ${JQ} '.nodes[0].kind[1] = "worker"' \
-        | ${JQ} ".nodes[0].hostname = \"${VM_PREFIX}-master-0\"" \
+        | ${JQ} ".nodes[0].hostname = \"${vm_name}\"" \
         | ${JQ} ".nodes[0].diskImage = \"${SNC_PRODUCT_NAME}.qcow2\"" \
         | ${JQ} ".nodes[0].internalIP = \"${VM_IP}\"" \
         | ${JQ} ".storage.diskImages[0].name = \"${SNC_PRODUCT_NAME}.qcow2\"" \
@@ -130,6 +131,7 @@ function eventually_add_pull_secret {
 function copy_additional_files {
     local srcDir=$1
     local destDir=$2
+    local vm_name=$3
 
     # Copy the kubeconfig file
     cp $1/auth/kubeconfig $destDir/
@@ -143,7 +145,7 @@ function copy_additional_files {
 
     cp podman-remote/linux/podman-remote $destDir/
 
-    update_json_description $srcDir $destDir
+    update_json_description $srcDir $destDir $vm_name
 
     eventually_add_pull_secret $destDir
 }
@@ -380,4 +382,19 @@ function download_podman() {
       ${UNZIP} -o -d podman-remote/windows/ podman-remote/windows/podman.zip
       mv podman-remote/windows/podman-${version}/usr/bin/podman.exe  podman-remote/windows
     fi
+}
+
+# As of now sparsify helper is very specific to OCP/OKD kind of bundle where we get the
+# partition for the root label and then mount it with guestfish to cleanup /boot. With
+# microshift vm we are using lvm and guestfish error out during mount
+# mount /dev/sda3 /
+# libguestfs: error: mount: mount exited with status 32: mount: /sysroot: unknown filesystem type 'LVM2_member'
+# There might be other way for guestfish to mount lvm but as of now using a seperate helper is easy.
+function sparsify_lvm() {
+    local destDir=$1
+    sudo cp /var/lib/libvirt/images/${SNC_PRODUCT_NAME}.qcow2 ${destDir}
+    sudo chown $USER:$USER -R ${destDir}
+    export LIBGUESTFS_BACKEND=direct
+    virt-sparsify --in-place ${destDir}/${SNC_PRODUCT_NAME}.qcow2
+    chmod 0644 ${destDir}/${SNC_PRODUCT_NAME}.qcow2
 }

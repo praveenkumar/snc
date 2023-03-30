@@ -36,7 +36,7 @@ CERT_ROTATION=${SNC_DISABLE_CERT_ROTATION:-enabled}
 USE_PATCHED_RELEASE_IMAGE=${SNC_USE_PATCHED_RELEASE_IMAGE:-disabled}
 HTPASSWD_FILE='users.htpasswd'
 
-run_preflight_checks
+run_preflight_checks ${BUNDLE_TYPE}
 
 # If user defined the OPENSHIFT_VERSION environment variable then use it.
 # Otherwise use the tagged version if available
@@ -182,7 +182,7 @@ ${OPENSHIFT_INSTALL} --dir ${INSTALL_DIR} wait-for install-complete ${OPENSHIFT_
 HOSTNAME=$(${SSH} core@api.${SNC_PRODUCT_NAME}.${BASE_DOMAIN} hostnamectl status --transient)
 ${SSH} core@api.${SNC_PRODUCT_NAME}.${BASE_DOMAIN} sudo hostnamectl set-hostname ${HOSTNAME}
 
-create_json_description
+create_json_description ${BUNDLE_TYPE}
 
 # Create persistent volumes
 create_pvs ${BUNDLE_TYPE}
@@ -229,7 +229,7 @@ ${SSH} core@api.${SNC_PRODUCT_NAME}.${BASE_DOMAIN} -- 'sudo mv /home/core/kubeco
 
 # Add exposed registry CA to VM
 retry ${OC} extract secret/router-ca --keys=tls.crt -n openshift-ingress-operator --confirm
-retry ${OC} create configmap registry-certs --from-file=default-route-openshift-image-registry.apps-crc.testing=tls.crt -n openshift-config
+retry ${OC} create configmap registry-certs --from-file=default-route-openshift-image-registry.apps-${SNC_PRODUCT_NAME}.${BASE_DOMAIN}=tls.crt -n openshift-config
 retry ${OC} patch image.config.openshift.io cluster -p '{"spec": {"additionalTrustedCA": {"name": "registry-certs"}}}' --type merge
 
 # Remove the machine config for chronyd to make it active again

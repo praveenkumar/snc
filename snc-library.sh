@@ -46,6 +46,7 @@ function download_oc() {
 }
 
 function run_preflight_checks() {
+	local bundle_type=$1
         if [ -z "${OPENSHIFT_PULL_SECRET_PATH-}" ]; then
             echo "OpenShift pull secret file path must be specified through the OPENSHIFT_PULL_SECRET_PATH environment variable"
             exit 1
@@ -56,11 +57,14 @@ function run_preflight_checks() {
 
         echo "Checking libvirt and DNS configuration"
 
-        LIBVIRT_URI=qemu+tcp://localhost/system
+	LIBVIRT_URI=qemu:///system
+	if [ ${bundle_type} == "snc" ] || [ ${bundle_type} == "okd" ]; then
+           LIBVIRT_URI=qemu+tcp://localhost/system
+	fi
 
-        # check if libvirtd is listening on a TCP socket
+        # check if we can connect to ${LIBVIRT_URI}
         if ! virsh -c ${LIBVIRT_URI} uri >/dev/null; then
-                preflight_failure  "libvirtd is not listening for plain-text TCP connections, see https://github.com/openshift/installer/tree/master/docs/dev/libvirt#configure-libvirt-to-accept-tcp-connections"
+              preflight_failure  "libvirtd is not listening for ${LIBVIRT_URI}, see https://github.com/openshift/installer/tree/master/docs/dev/libvirt#configure-libvirt-to-accept-tcp-connections"
         fi
 
 	if ! virsh -c ${LIBVIRT_URI} net-info default &> /dev/null; then
@@ -88,7 +92,7 @@ function run_preflight_checks() {
                 preflight_failure "Your ${ARCH} platform does not provide a hardware-accelerated hypervisor, it's strongly recommended to enable it before running SNC. Check virt-host-validate for more detailed diagnostics"
                 return
         fi
-
+	if [ ${bundle_type} == "snc" ] || [ ${bundle_type} == "okd" ]; then
         # check that api.${SNC_PRODUCT_NAME}.${BASE_DOMAIN} either can't be resolved, or resolves to 192.168.126.1[01]
         local ping_status
         ping_status="$(ping -c1 api.${SNC_PRODUCT_NAME}.${BASE_DOMAIN} | head -1 || true >/dev/null)"
@@ -96,7 +100,7 @@ function run_preflight_checks() {
                 preflight_failure "DNS setup seems wrong, api.${SNC_PRODUCT_NAME}.${BASE_DOMAIN} resolved to an IP which is neither 192.168.126.10 nor 192.168.126.11, please check your NetworkManager configuration and /etc/hosts content"
                 return
         fi
-
+	fi
         # check if firewalld is configured to allow traffic from 192.168.126.0/24 to 192.168.122.1
         # this check is very basic and expects the configuration to match
         # https://github.com/openshift/installer/tree/master/docs/dev/libvirt#firewalld
@@ -130,18 +134,23 @@ function replace_pull_secret() {
 }
 
 function create_json_description {
-    openshiftInstallerVersion=$(${OPENSHIFT_INSTALL} version)
+    local bundle_type=$1
     sncGitHash=$(git describe --abbrev=4 HEAD 2>/dev/null || git rev-parse --short=4 HEAD)
     echo {} | ${JQ} '.version = "1.4"' \
             | ${JQ} ".type = \"${BUNDLE_TYPE}\"" \
             | ${JQ} ".arch = \"${yq_ARCH}\"" \
             | ${JQ} ".buildInfo.buildTime = \"$(date -u --iso-8601=seconds)\"" \
-            | ${JQ} ".buildInfo.openshiftInstallerVersion = \"${openshiftInstallerVersion}\"" \
             | ${JQ} ".buildInfo.sncVersion = \"git${sncGitHash}\"" \
             | ${JQ} ".clusterInfo.openshiftVersion = \"${OPENSHIFT_RELEASE_VERSION}\"" \
             | ${JQ} ".clusterInfo.clusterName = \"${SNC_PRODUCT_NAME}\"" \
             | ${JQ} ".clusterInfo.baseDomain = \"${BASE_DOMAIN}\"" \
             | ${JQ} ".clusterInfo.appsDomain = \"apps-${SNC_PRODUCT_NAME}.${BASE_DOMAIN}\"" >${INSTALL_DIR}/crc-bundle-info.json
+    if [ ${bundle_type} == "snc" ] || [ ${bundle_type} == "okd" ]; then
+        openshiftInstallerVersion=$(${OPENSHIFT_INSTALL} version)
+        tmp=$(mktemp)
+        cat ${INSTALL_DIR}/crc-bundle-info.json | ${JQ} ".buildInfo.openshiftInstallerVersion = \"${openshiftInstallerVersion}\"" \
+            > ${tmp} && mv ${tmp} ${INSTALL_DIR}/crc-bundle-info.json
+    fi
 }
 
 
