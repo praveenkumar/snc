@@ -18,7 +18,7 @@ BUNDLE_TYPE="snc"
 if [[ ${OKD_VERSION} != "none" ]]
 then
     OPENSHIFT_VERSION=${OKD_VERSION}
-    MIRROR=${MIRROR:-https://github.com/openshift/okd/releases/download}
+    MIRROR=${MIRROR:-https://github.com/okd-project/okd-scos/releases/download}
     BUNDLE_TYPE="okd"
 fi
 

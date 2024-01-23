@@ -24,6 +24,8 @@ case ${BUNDLE_TYPE} in
         ;;
     okd)
         destDirPrefix="crc_${BUNDLE_TYPE}"
+        # Base OS is not changed for scos-okd because `/proc/cmdline` still contain fedora-coreos
+        # https://github.com/okd-project/okd-scos/issues/18
         BASE_OS=fedora-coreos
         ;;
     snc)
