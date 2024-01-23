@@ -43,7 +43,12 @@ function download_oc() {
     fi
     if [ "${SNC_GENERATE_WINDOWS_BUNDLE}" != "0" ]; then
         mkdir -p openshift-clients/windows
-        curl -L "${MIRROR}/${OPENSHIFT_RELEASE_VERSION}/openshift-client-windows-${OPENSHIFT_RELEASE_VERSION}.zip" > openshift-clients/windows/oc.zip
+        if [ "${BUNDLE_TYPE}" == "okd" ]; then
+            # hardcode download url for oc client in windows until it is fixed on scos side
+            curl -L https://github.com/okd-project/okd/releases/download/4.14.0-0.okd-2024-01-06-084517/openshift-client-windows-4.14.0-0.okd-2024-01-06-084517.zip > openshift-clients/windows/oc.zip
+        else
+            curl -L "${MIRROR}/${OPENSHIFT_RELEASE_VERSION}/openshift-client-windows-${OPENSHIFT_RELEASE_VERSION}.zip" > openshift-clients/windows/oc.zip
+        fi
         ${UNZIP} -o -d openshift-clients/windows/ openshift-clients/windows/oc.zip
     fi
 }
