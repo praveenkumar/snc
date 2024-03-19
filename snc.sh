@@ -32,9 +32,6 @@ CRC_PV_DIR="/mnt/pv-data"
 SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i id_ecdsa_crc"
 SCP="scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i id_ecdsa_crc"
 MIRROR=${MIRROR:-https://mirror.openshift.com/pub/openshift-v4/$ARCH/clients/ocp}
-CERT_ROTATION=${SNC_DISABLE_CERT_ROTATION:-enabled}
-USE_PATCHED_RELEASE_IMAGE=${SNC_USE_PATCHED_RELEASE_IMAGE:-disabled}
-HTPASSWD_FILE='users.htpasswd'
 
 run_preflight_checks ${BUNDLE_TYPE}
 
@@ -71,13 +68,6 @@ if test -z ${OPENSHIFT_INSTALL-}; then
     echo "Extracting OpenShift installer binary"
     ${OC} adm release extract -a ${OPENSHIFT_PULL_SECRET_PATH} ${OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE} --command=openshift-install --to .
     OPENSHIFT_INSTALL=./openshift-install
-fi
-
-if [[ ${USE_PATCHED_RELEASE_IMAGE} == "enabled" ]]
-then
-   echo "Using release image with patched KAO/KCMO images"
-   OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE=quay.io/crcont/ocp-release:${OPENSHIFT_RELEASE_VERSION}-${yq_ARCH}
-   echo "OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE set to ${OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE}"
 fi
 
 # Allow to disable debug by setting SNC_OPENSHIFT_INSTALL_NO_DEBUG in the environment
@@ -118,13 +108,6 @@ EOF
 # Reload the NetworkManager to make DNS overlay effective
 sudo systemctl reload NetworkManager
 
-if [[ ${CERT_ROTATION} == "enabled" ]]
-then
-    # Disable the network time sync and set the clock to past (for a day) on host
-    sudo timedatectl set-ntp off
-    sudo date -s '-1 day'
-fi
-
 # Create the INSTALL_DIR for the installer and copy the install-config
 rm -fr ${INSTALL_DIR} && mkdir ${INSTALL_DIR} && cp install-config.yaml ${INSTALL_DIR}
 ${YQ} eval --inplace ".controlPlane.architecture = \"${yq_ARCH}\"" ${INSTALL_DIR}/install-config.yaml
@@ -150,7 +133,6 @@ cp 99-openshift-machineconfig-master-dummy-networks.yaml $INSTALL_DIR/openshift/
 cp 99-openshift-machineconfig-master-swap-count.yaml $INSTALL_DIR/openshift/
 cp 99-openshift-machineconfig-master-swap-service.yaml $INSTALL_DIR/openshift/
 cp 99-kubelet-config.yaml $INSTALL_DIR/openshift/
-cp 99_feature-gate.yaml $INSTALL_DIR/openshift/
 
 # Add kubelet config resource to make change in kubelet
 DYNAMIC_DATA=$(base64 -w0 node-sizing-enabled.env) envsubst < 99_master-node-sizing-enabled-env.yaml.in > $INSTALL_DIR/openshift/99_master-node-sizing-enabled-env.yaml
@@ -159,8 +141,6 @@ export OPENSHIFT_INSTALL_INVOKER="codeReadyContainers"
 export KUBECONFIG=${INSTALL_DIR}/auth/kubeconfig
 
 OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE=$OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE ${OPENSHIFT_INSTALL} --dir ${INSTALL_DIR} create single-node-ignition-config ${OPENSHIFT_INSTALL_EXTRA_ARGS}
-# mask the chronyd service on the bootstrap node
-cat <<< $(${JQ} '.systemd.units += [{"mask": true, "name": "chronyd.service"}]' ${INSTALL_DIR}/bootstrap-in-place-for-live-iso.ign) > ${INSTALL_DIR}/bootstrap-in-place-for-live-iso.ign
 
 # Download the image
 # https://docs.openshift.com/container-platform/4.14/installing/installing_sno/install-sno-installing-sno.html#install-sno-installing-sno-manually
@@ -179,106 +159,3 @@ sudo mv -Z ${INSTALL_DIR}/rhcos-live.iso /var/lib/libvirt/${SNC_PRODUCT_NAME}/rh
 create_vm rhcos-live.iso
 
 ${OPENSHIFT_INSTALL} --dir ${INSTALL_DIR} wait-for install-complete ${OPENSHIFT_INSTALL_EXTRA_ARGS} || ${OC} adm must-gather --dest-dir ${INSTALL_DIR}
-
-if [[ ${CERT_ROTATION} == "enabled" ]]
-then
-    renew_certificates
-fi
-
-# Wait for install to complete, this provide another 30 mins to make resources (apis) stable
-${OPENSHIFT_INSTALL} --dir ${INSTALL_DIR} wait-for install-complete ${OPENSHIFT_INSTALL_EXTRA_ARGS}
-
-# Set the VM static hostname to crc-xxxxx-master-0 instead of localhost.localdomain
-HOSTNAME=$(${SSH} core@api.${SNC_PRODUCT_NAME}.${BASE_DOMAIN} hostnamectl status --transient)
-${SSH} core@api.${SNC_PRODUCT_NAME}.${BASE_DOMAIN} sudo hostnamectl set-hostname ${HOSTNAME}
-
-create_json_description ${BUNDLE_TYPE}
-
-# Create persistent volumes
-create_pvs ${BUNDLE_TYPE}
-
-# Mark some of the deployments unmanaged by the cluster-version-operator (CVO)
-# https://github.com/openshift/cluster-version-operator/blob/master/docs/dev/clusterversion.md#setting-objects-unmanaged
-# Objects declared in this file are still created by the CVO at startup.
-# The CVO won't modify these objects anymore with the following command. Hence, we can remove them afterwards.
-retry ${OC} patch clusterversion version --type json -p "$(cat cvo-overrides-after-first-run.yaml)"
-
-# Scale route deployment from 2 to 1
-retry ${OC} scale --replicas=1 ingresscontroller/default -n openshift-ingress-operator
-
-# Set default route for registry CRD from false to true.
-retry ${OC} patch config.imageregistry.operator.openshift.io/cluster --patch '{"spec":{"defaultRoute":true}}' --type=merge
-
-# Add a tip in the login page
-secret_template=$(retry ${OC} get secrets -n openshift-authentication v4-0-config-system-ocp-branding-template -o json)
-${JQ} -r '.data["login.html"]' <(echo "${secret_template}") | base64 -d > login.html
-${PATCH} login.html < login.html.patch
-retry ${OC} create secret generic login-template --from-file=login.html -n openshift-config
-
-# Generate the htpasswd file to have admin and developer user
-generate_htpasswd_file ${INSTALL_DIR} ${HTPASSWD_FILE}
-
-# Add a user developer with htpasswd identity provider and give it sudoer role
-# Add kubeadmin user with cluster-admin role
-retry ${OC} create secret generic htpass-secret --from-file=htpasswd=${HTPASSWD_FILE} -n openshift-config
-retry ${OC} apply -f oauth_cr.yaml
-retry ${OC} create clusterrolebinding kubeadmin --clusterrole=cluster-admin --user=kubeadmin
-
-# Remove temp kubeadmin user
-retry ${OC} delete secrets kubeadmin -n kube-system
-
-# Add security message on the web console
-retry ${OC} create -f security-notice.yaml
-
-# Remove the Cluster ID with a empty string.
-retry ${OC} patch clusterversion version -p '{"spec":{"clusterID":""}}' --type merge
-
-# SCP the kubeconfig file to VM
-${SCP} ${KUBECONFIG} core@api.${SNC_PRODUCT_NAME}.${BASE_DOMAIN}:/home/core/
-${SSH} core@api.${SNC_PRODUCT_NAME}.${BASE_DOMAIN} -- 'sudo mv /home/core/kubeconfig /opt/'
-
-# Add exposed registry CA to VM
-retry ${OC} extract secret/router-ca --keys=tls.crt -n openshift-ingress-operator --confirm
-retry ${OC} create configmap registry-certs --from-file=default-route-openshift-image-registry.apps-${SNC_PRODUCT_NAME}.${BASE_DOMAIN}=tls.crt -n openshift-config
-retry ${OC} patch image.config.openshift.io cluster -p '{"spec": {"additionalTrustedCA": {"name": "registry-certs"}}}' --type merge
-
-# Remove the machine config for chronyd to make it active again
-retry ${OC} delete mc chronyd-mask
-
-# Wait for the cluster again to become stable because of all the patches/changes
-wait_till_cluster_stable
-
-mc_before_removing_pullsecret=$(retry ${OC} get mc --sort-by=.metadata.creationTimestamp --no-headers -oname)
-# Replace pull secret with a null json string '{}'
-retry ${OC} replace -f pull-secret.yaml
-mc_after_removing_pullsecret=$(retry ${OC} get mc --sort-by=.metadata.creationTimestamp --no-headers -oname)
-
-while [ "${mc_before_removing_pullsecret}" == "${mc_after_removing_pullsecret}" ]; do
-	echo "Machine config is still not rendered"
-	mc_after_removing_pullsecret=$(retry ${OC} get mc --sort-by=.metadata.creationTimestamp --no-headers -oname)
-done
-
-wait_till_cluster_stable openshift-marketplace
-
-# Delete the pods which are there in Complete state
-retry ${OC} delete pod --field-selector=status.phase==Succeeded --all-namespaces
-
-# Delete outdated rendered master/worker machineconfigs and just keep the latest one
-mc_name=$(retry ${OC} get mc --sort-by=.metadata.creationTimestamp --no-headers -oname)
-echo "${mc_name}" | grep rendered-master | head -n -1 | xargs -t ${OC} delete
-echo "${mc_name}" | grep rendered-worker | head -n -1 | xargs -t ${OC} delete
-# Wait till machine config pool is updated correctly
-while retry ${OC} get mcp master -ojsonpath='{.status.conditions[?(@.type!="Updated")].status}' | grep True; do
-    echo "Machine config still in updating/degrading state"
-done
-
-# Create a container from baremetal-runtimecfg image which consumed by nodeip-configuration service so it is
-# not deleted by `crictl rmi --prune` command
-BAREMETAL_RUNTIMECFG=$(${OC} adm release info -a ${OPENSHIFT_PULL_SECRET_PATH} ${OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE} --image-for=baremetal-runtimecfg)
-${SSH} core@api.${SNC_PRODUCT_NAME}.${BASE_DOMAIN} -- "sudo podman create --name baremetal_runtimecfg ${BAREMETAL_RUNTIMECFG}"
-
-# Remove unused images from container storage
-${SSH} core@api.${SNC_PRODUCT_NAME}.${BASE_DOMAIN} -- 'sudo crictl rmi --prune'
-
-# Remove the baremetal_runtimecfg container which is temp created
-${SSH} core@api.${SNC_PRODUCT_NAME}.${BASE_DOMAIN} -- "sudo podman rm baremetal_runtimecfg"

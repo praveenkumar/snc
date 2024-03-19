@@ -36,3 +36,4 @@ capabilities:
   - Build
   - OperatorLifecycleManager
 publish: External
+featureSet: TechPreviewNoUpgrade
