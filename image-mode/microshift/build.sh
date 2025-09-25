@@ -134,14 +134,12 @@ cat < "${SCRIPTDIR}/config/config.toml.template" \
     > "${BUILDDIR}"/config.toml
 
 title "Building bootc image for microshift"
-sudo podman build --no-cache --authfile ${OCP_PULL_SECRET_FILE} -t ${IMGNAME}:${MICROSHIFT_VERSION}  \
+sudo podman build --authfile ${OCP_PULL_SECRET_FILE} -v ${OCP_PULL_SECRET_FILE}:/etc/crio/openshift-pull-secret:z -t ${IMGNAME}:${MICROSHIFT_VERSION}  \
   --build-arg MICROSHIFT_VER=${MICROSHIFT_VERSION} \
   --env UNRELEASED_MIRROR_REPO=${USE_UNRELEASED_MIRROR_REPO} \
   -f "${SCRIPTDIR}/config/Containerfile.bootc-rhel9"
 
-# As of now we are generating the ISO to have same previous behavior
-# TODO: Try to use qcow2 directly for vm creation
-title "Creating ISO image"
+title "Creating disk image of type qcow2"
 sudo podman run --authfile ${OCP_PULL_SECRET_FILE} --rm -it \
     --privileged \
     --security-opt label=type:unconfined_t \
@@ -150,6 +148,6 @@ sudo podman run --authfile ${OCP_PULL_SECRET_FILE} --rm -it \
     -v "${BUILDDIR}":/output \
     registry.redhat.io/rhel9/bootc-image-builder:latest \
     --local \
-    --type iso \
+    --type qcow2 \
     --config /config.toml \
     localhost/${IMGNAME}:${MICROSHIFT_VERSION}

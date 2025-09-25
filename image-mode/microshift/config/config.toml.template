@@ -1,3 +1,34 @@
+# Disk partitions configuration using osbuild disk customizations
+# This creates: EFI system partition, boot partition, and LVM volume group
+# BIOS boot partition and GPT disk label are automatically handled by osbuild
+# when EFI system partition is present
+[[customizations.disk.partitions]]
+type = "plain"
+fs_type = "xfs"
+mountpoint = "/boot"
+minsize = "800 MiB"
+
+[[customizations.disk.partitions]]
+type = "lvm"
+name = "rhel"
+minsize = "10 GiB"
+
+[[customizations.disk.partitions.logical_volumes]]
+name = "root"
+mountpoint = "/"
+fs_type = "xfs"
+minsize = "REPLACE_LVM_SYSROOT_SIZE"
+
+[[customizations.user]]
+name = "core"
+description = "Default user"
+home = "/home/core"
+shell = "/bin/bash"
+groups = ["wheel"]
+key = "REPLACE_CORE_AUTHORIZED_KEYS_CONTENTS"
+
+# Image mode: osbuild handles disk partitions, users, and groups
+# Kickstart handles remaining customizations (files, hostname, services, etc.)
 [customizations.installer.kickstart]
 contents = """
 lang en_US.UTF-8
@@ -9,65 +40,15 @@ reboot
 # Configure network to use DHCP and activate on boot
 network --bootproto=dhcp --device=link --activate --onboot=on
 
-# Partition disk with a 1MB BIOS boot, 200M EFI, 800M boot XFS partition and
-# an LVM volume containing a 10GB+ system root. The remainder of the volume
-# will be used by the CSI driver for storing data
-#
-# For example, a 20GB disk would be partitioned in the following way:
-#
-# NAME          MAJ:MIN RM SIZE RO TYPE MOUNTPOINT
-# sda             8:0    0  20G  0 disk
-# ├─sda1          8:1    0   1M  0 part
-# ├─sda2          8:2    0 200M  0 part /boot/efi
-# ├─sda3          8:3    0 800M  0 part /boot
-# └─sda4          8:4    0  19G  0 part
-#  └─rhel-root  253:0    0  10G  0 lvm  /sysroot
-#
+# Disk initialization (partitioning handled by osbuild disk customizations above)
 zerombr
-clearpart --all --disklabel gpt
-part biosboot --fstype=biosboot --size=1
-part /boot/efi --fstype=efi --size=200
-part /boot --fstype=xfs --asprimary --size=800
-# Uncomment this line to add a SWAP partition of the recommended size
-#part swap --fstype=swap --recommended
-part pv.01 --grow
-volgroup rhel pv.01
-logvol / --vgname=rhel --fstype=xfs --size=REPLACE_LVM_SYSROOT_SIZE --name=root
+clearpart --all
 
 # Lock root user account
 rootpw --lock
 
 
 %post --log=/var/log/anaconda/post-install.log --erroronfail
-
-# The pull secret is mandatory for MicroShift builds on top of OpenShift, but not OKD
-# The /etc/crio/crio.conf.d/microshift.conf references the /etc/crio/openshift-pull-secret file
-cat > /etc/crio/openshift-pull-secret <<EOF
-REPLACE_OCP_PULL_SECRET_CONTENTS
-EOF
-chmod 600 /etc/crio/openshift-pull-secret
-
-# Drop in file for microshift base domain
-cat > /etc/microshift/config.d/00-microshift-dns.yaml <<EOF
-dns:
-   baseDomain: REPLACE_BASE_DOMAIN
-EOF
-
-# Create a default core user, allowing it to run sudo commands without password
-useradd -m -d /home/core core
-echo -e 'core\tALL=(ALL)\tNOPASSWD: ALL' > /etc/sudoers.d/microshift
-
-# Add authorized ssh keys
-mkdir -m 700 /home/core/.ssh
-cat > /home/core/.ssh/authorized_keys <<EOF
-REPLACE_CORE_AUTHORIZED_KEYS_CONTENTS
-EOF
-chmod 600 /home/core/.ssh/authorized_keys
-
-
-# Set static hostname
-echo "REPLACE_HOSTNAME" > /etc/hostname
-chmod 644 /etc/hostname
 
 # Support to boot for UEFI and legacy mode
 grub2-install --target=i386-pc /dev/vda
@@ -92,8 +73,5 @@ tee /etc/containers/registries.conf.d/999-podman-machine.conf <<EOF
 unqualified-search-registries=["docker.io"]
 EOF
 
-# Enable linger for core user to make sure podman socket work when user not logged in
-mkdir -p /var/lib/systemd/linger/
-touch /var/lib/systemd/linger/core
 %end
 """

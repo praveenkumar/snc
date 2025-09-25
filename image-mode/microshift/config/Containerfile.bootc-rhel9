@@ -1,5 +1,9 @@
+FROM registry.redhat.io/rhel9/rhel-bootc:9.6 as builder
+RUN echo api.crc.testing > /hostname
+
 FROM registry.redhat.io/rhel9/rhel-bootc:9.6
 
+COPY --from=builder /hostname /etc/hostname
 ARG MICROSHIFT_VER=4.18
 RUN if [ -z "${UNRELEASED_MIRROR_REPO}" ]; then \
       dnf config-manager --set-enabled "rhocp-${MICROSHIFT_VER}-for-rhel-9-$(uname -m)-rpms" \
@@ -16,7 +20,6 @@ RUN if [ -z "${UNRELEASED_MIRROR_REPO}" ]; then \
     fi
 RUN dnf install -y firewalld microshift microshift-release-info cloud-utils-growpart qemu-guest-agent dnsmasq && \
     dnf clean all && rm -fr /etc/yum.repos.d/*
-
 # https://github.com/containers/bootc/discussions/1036
 # /Users is created to make sure share directory works on
 # mac because on linux it is /home and for windows it is /mnt
@@ -24,3 +27,9 @@ RUN dnf install -y firewalld microshift microshift-release-info cloud-utils-grow
 RUN rm -fr /opt && ln -sf var/opt /opt && mkdir /var/opt
 RUN ln -sf var/Users /Users && mkdir /var/Users
 RUN rm -fr /usr/local && ln -sf ../var/usrlocal /usr/local && mkdir /var/usrlocal
+
+COPY bundle_setup_script.sh copy_embedded_images.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/bundle_setup_script.sh && \
+    chmod +x /usr/local/bin/copy_embedded_images.sh && \
+    /usr/local/bin/bundle_setup_script.sh && \
+    rm -fr /usr/local/bin/bundle_setup_script.sh

@@ -7,6 +7,7 @@ export LANG=C.UTF-8
 
 source tools.sh
 source snc-library.sh
+source createdisk-library.sh
 
 BUNDLE_TYPE="microshift"
 INSTALL_DIR=crc-tmp-install-data
@@ -26,11 +27,7 @@ if ! sudo subscription-manager status >& /dev/null ; then
    exit 1
 fi
 
-run_preflight_checks ${BUNDLE_TYPE}
 rm -fr ${INSTALL_DIR} && mkdir ${INSTALL_DIR}
-
-destroy_libvirt_resources microshift-installer.iso
-create_libvirt_resources
 
 # Generate a new ssh keypair for this cluster
 # Create a 521bit ECDSA Key
@@ -55,7 +52,7 @@ function create_iso {
 microshift_pkg_dir=$(mktemp -p /tmp -d tmp-rpmXXX)
 
 create_iso ${microshift_pkg_dir}
-sudo cp -Z ${microshift_pkg_dir}/bootiso/install.iso /var/lib/libvirt/${SNC_PRODUCT_NAME}/microshift-installer.iso
+sudo cp -Z ${microshift_pkg_dir}/qcow2/disk.qcow2 /var/lib/libvirt/${SNC_PRODUCT_NAME}/${SNC_PRODUCT_NAME}.qcow2
 OPENSHIFT_RELEASE_VERSION=$(sudo podman run --rm -it localhost/microshift:${MICROSHIFT_VERSION} /usr/bin/rpm -q --qf '%{VERSION}' microshift)
 # Change 4.x.0~ec0 to 4.x.0-ec0
 # https://docs.fedoraproject.org/en-US/packaging-guidelines/Versioning/#_complex_versioning
@@ -68,6 +65,10 @@ download_oc
 
 create_json_description ${BUNDLE_TYPE}
 
+# Download podman binary
+PODMAN_VERSION=$(sudo podman run --rm -it localhost/microshift:${MICROSHIFT_VERSION} /usr/bin/rpm -q --qf '%{VERSION}' podman)
+download_podman ${PODMAN_VERSION} ${yq_ARCH}
+
 # For microshift we create an empty kubeconfig file
 # to have it as part of bundle because we don't run microshift
 # service as part of bundle creation which creates the kubeconfig
@@ -75,5 +76,33 @@ create_json_description ${BUNDLE_TYPE}
 mkdir -p ${INSTALL_DIR}/auth
 touch ${INSTALL_DIR}/auth/kubeconfig
 
-# Start the VM with generated ISO
-create_vm microshift-installer.iso
+# libvirt image generation
+get_dest_dir_suffix "${OPENSHIFT_RELEASE_VERSION}"
+destDirSuffix="${DEST_DIR_SUFFIX}"
+destDirPrefix="crc_microshift"
+
+libvirtDestDir="${destDirPrefix}_libvirt_${destDirSuffix}"
+rm -fr ${libvirtDestDir} ${libvirtDestDir}.crcbundle
+mkdir "$libvirtDestDir"
+
+create_qemu_image "$libvirtDestDir"
+VM_IP="2.2.2.2"
+copy_additional_files "$INSTALL_DIR" "$libvirtDestDir" "${SNC_PRODUCT_NAME}"
+if [ "${SNC_GENERATE_LINUX_BUNDLE}" != "0" ]; then
+    create_tarball "$libvirtDestDir"
+fi
+
+if [ "${SNC_GENERATE_WINDOWS_BUNDLE}" != "0" ]; then
+    hypervDestDir="${destDirPrefix}_hyperv_${destDirSuffix}"
+    rm -fr ${hypervDestDir} ${hypervDestDir}.crcbundle
+    generate_hyperv_bundle "$libvirtDestDir" "$hypervDestDir"
+fi
+
+# vfkit image generation
+# This must be done after the generation of libvirt image as it reuses some of
+# the content of $libvirtDestDir
+if [ "${SNC_GENERATE_MACOS_BUNDLE}" != "0" ]; then
+    vfkitDestDir="${destDirPrefix}_vfkit_${destDirSuffix}"
+    rm -fr ${vfkitDestDir} ${vfkitDestDir}.crcbundle
+    generate_vfkit_bundle "$libvirtDestDir" "$vfkitDestDir"
+fi
