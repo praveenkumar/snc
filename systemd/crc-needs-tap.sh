@@ -19,6 +19,14 @@ case "${virt}" in
     echo "Running with vfkit ($virt) virtualization. Don't need tap0."
     exit "$EXIT_DONT_NEED_TAP"
     ;;
+  kvm)
+    if [[ "${CRC_SELF_SUFFICIENT:-0}" == 1 ]]; then
+      echo "Running with qemu ($virt) virtualization and CRC_SELF_SUFFICIENT=1. Don't need tap0."
+      exit "$EXIT_DONT_NEED_TAP"
+    fi
+    echo "Running with qemu ($virt) virtualization. Need tap0."
+    exit "$EXIT_NEED_TAP"
+    ;;
   none)
     echo "Bare metal detected. Don't need tap0."
     exit "$EXIT_DONT_NEED_TAP"
